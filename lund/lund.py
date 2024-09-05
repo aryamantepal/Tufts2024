@@ -6,6 +6,10 @@ from scipy.spatial.distance import pdist, squareform
 2.). Compute diffusion distances on the graph and a kernel density estimator.
 3.). Label using the LUND scheme.'''
 
+
+
+#below is Sam Polk's implementation of LUND.
+
 def LearningbyUnsupervisedNonlinearDiffusion(X, t, G, p, K_known=None):
     '''
     This functino produces a structure with multiscale clusterings produced with the LUND algorithm.
@@ -27,19 +31,19 @@ def LearningbyUnsupervisedNonlinearDiffusion(X, t, G, p, K_known=None):
     print("Number of Eigenvectors:", G['EigenVecs'].shape)
 
     DiffusionMap = np.zeros_like(G['EigenVecs'])
-    # print("G EigenVecs", G['EigenVecs'])
-    # print("Diffusion map", DiffusionMap)
-    #iterating over columns?? i think matlab is indexed from 1
-    print('replicate error')
+
+    print("Shape of G['EigenVecs']:", G['EigenVecs'].shape)
+    print("Shape of G['EigenVals']:", G['EigenVals'].shape)
     for l in range(DiffusionMap.shape[1]):
         DiffusionMap[:, l] = G['EigenVecs'][:, l] * (G['EigenVals'][l]**t)
 
-
-
-    # Calculate pairwise diffusion distance at time t between points in X
     DiffusionDistance = squareform(pdist(np.real(DiffusionMap)))
 
+
     # compute rho_t(x), stored as rt
+    print("Shape of DiffusionDistance:", DiffusionDistance.shape)
+    print("Shape of p:", p.shape)
+
     rt = np.zeros(n)
     for i in range(n):
         if p[i] != np.max(p):
@@ -47,26 +51,22 @@ def LearningbyUnsupervisedNonlinearDiffusion(X, t, G, p, K_known=None):
         else:
             rt[i] = np.max(DiffusionDistance[i, :])
 
-    # Extract Dt(x) and sort in descending order
-    #ignore . element wise operations handled in python.
     Dt = rt * p
-    m_sorting = np.argsort(-Dt) #sorting in descending order technically bc negative versions
+    m_sorting = np.argsort(-Dt) 
+    print("m_sorting:", m_sorting)
 
-    # Determine K based on the ratio of sorted Dt(x_{m_k})
-    if K_known is not None: #nargin dne in python.
+    if K_known is not None: 
         K = K_known
     else:
         ratios = np.divide(Dt[m_sorting[0:n-1]], Dt[m_sorting[1:n]])
         K = np.argmax(ratios) + 1
+    print("Number of clusters K:", K)
 
     if K == 1:
         C = np.ones(n, dtype=int)
     else:
         # Label modes
         C[m_sorting[:K]] = np.arange(1, K + 1)
-
-        # Label non-modal points according to the label of their Dt-nearest
-        # neighbor of higher density that is already labeled.
         l_sorting = np.argsort(-p)
         for j in range(n):
             i = l_sorting[j]
@@ -75,9 +75,9 @@ def LearningbyUnsupervisedNonlinearDiffusion(X, t, G, p, K_known=None):
                 if len(candidates) > 0:
                     temp_idx = np.argmin(DiffusionDistance[i, candidates])
                     C[i] = C[candidates[temp_idx]]
-                else:
-                    # Handle the case where no candidates are found
-                    C[i] = -1  # Assign a default value, or handle as needed
-                    print('this was a bandaid')
+                # else:
+                #     # Handling the case where no candidates are found?
+                #     C[i] = -1  
+                #     print('this was a bandaid')
 
     return C, K, Dt

@@ -4,7 +4,13 @@ from sklearn.neighbors import kneighbors_graph
 from scipy.sparse.csgraph import laplacian
 from scipy.sparse.linalg import eigs
 from sklearn.neighbors import KernelDensity
-
+from scipy.sparse import csr_matrix
+from scipy.sparse.linalg import svds
+from scipy.spatial.distance import cdist
+from sklearn.datasets import make_moons
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import normalize
 
 class GraphExtractor:
     '''
@@ -17,88 +23,63 @@ class GraphExtractor:
     If NEigs not included in Hyperparam structure, , = argmax(abs(diff(eigenvals))) 
     eigenvalues are included in graph structure.
     '''
-    def __init__(self, sigma = 1.0, DiffusionNN = 250, NEigs = 10):
-        # values for SalinasA; sigma = 1.0, NN = 250
+    def __init__(self, sigma = 5.0, DiffusionNN = 20, NEigs = 100):
         self.sigma = sigma
         self.DiffusionNN = DiffusionNN
-        self.NEigs = NEigs
+        self.NEigs = int(NEigs)
+        print(f"Initialized with NEigs = {self.NEigs} (type: {type(self.NEigs)})")
+
 
     def extract_graph(self, X, Dist = None):
         n = len(X)
-        # print("n:",n) - value correct
         if Dist == None:
             Dist = pdist(X)
             Dist = squareform(Dist)
+
  
         W = np.zeros((n,n))
         P = np.zeros((n,n))
         D = np.zeros((n,n))
         
-        print(Dist)
         for i in range(n):
-            #note mink in MATLAB returns k smallest elements of array and indices.
-            #rewritten in python .. sort should sort the distances and argsort should return the indices.
-
-            #apparently there exists a more effecient way. fix later?
             idx = np.argpartition(Dist[i, :], self.DiffusionNN + 1)[:self.DiffusionNN + 1]
             D_sorted = Dist[i, idx]
             sorting = np.argsort(D_sorted)
             idx = idx[sorting]
 
-            W[i, idx[1:]] = np.exp(-(D_sorted[sorting][1:] ** 2) / (self.sigma ** 2))
+            W[i, idx[1:]] = np.exp(-(D_sorted[1:] ** 2) / (self.sigma ** 2))
             D[i, i] = np.sum(W[i, :])  
             P[i, idx[1:]] = W[i, idx[1:]] / D[i, i]
 
             
-
-
-            #TODO: Checking all of these values...
         pi = np.diag(D) / np.sum(np.diag(D))
-
-        #ok do the eigendecomp here..
-        print('entering try')
         try:
+            
             if self.NEigs is not None:
-                #worry about implementing this later
-                # there are 10 eigs
-                print(" IS this working??? - SELF.NEIGS IS NOT NONE")
-                print("Eigenvalues shape:", eigvals.shape)
-                print("Eigenvectors shape:", eigvecs.shape)
-                n_eigs = 1000
-                eigvals, eigvecs = eigs(P, k=n_eigs) 
+                n_eigs = min(self.NEigs, n)
+                eigvals, eigvecs = eigs(P, k = n_eigs) 
                 eigvals = np.real(eigvals)
                 sorted_eigvals = np.sort(-np.abs(eigvals))
                 eiggap = np.abs(np.diff(sorted_eigvals)) 
                 
                 # pass
             else:
-                print('else condition of try executed')
-                eigvals, eigvecs = eigs(P, k=15) #scipy order is different (see docs if needed)
-                print("Eigenvalues shape:", eigvals.shape)
-                print("Eigenvectors shape:", eigvecs.shape)
-
+                eigvals, eigvecs = eigs(P, k=20) #scipy order is different (see docs if needed)
                 eigvals = np.real(eigvals)
-
-
                 sorted_eigvals = np.sort(-np.abs(eigvals))
                 eiggap = np.abs(np.diff(sorted_eigvals))
                 n_eigs = np.argmax(eiggap) + 1 #python indexing is 0.
-                #"fringe cases"
                 if n_eigs < 5:
                     n_eigs = 5
-            #again,,,,,  capabilities python j doesnt have.
+
             idx = np.argsort(-np.abs(eigvals))
             eigvals = eigvals[idx][:n_eigs]
             eigvecs = eigvecs[:, idx][:n_eigs]
-            print("Eigenvalues shape:", eigvals.shape)
-            print("Eigenvectors shape:", eigvecs.shape)
+            print('debugguing eigenvales length is ', len(eigvals))
 
-            
-            # setting theoretical val for first eigenpair
             eigvecs[:, 0] = 1
             eigvals[0] = 1
-            print('sucessfully')
-            #store in graph structure?
+           
             graph = {
                 'Hyperparameters': {
                     'Sigma': self.sigma,
@@ -125,30 +106,29 @@ class GraphExtractor:
             }
         
         return graph
+    
+# def compute_kde_in_reduced_space(X, eigenvecs, bandwidth=1.0):
+#     eigenvecs_reduced = eigenvecs[:, :X.shape[1]].T
+    
+#     X_reduced = np.dot(X, eigenvecs_reduced)
+    
+#     kde = KernelDensity(bandwidth=bandwidth)
+#     print('shape of X_reduced is', X_reduced.shape)
+#     kde.fit(X_reduced)
+#     log_density = kde.score_samples(X_reduced)    
+#     p = np.exp(log_density)
+#     return p
 
-class KDE:
-    '''
-    SKLEARN!!!!
-    '''
-    def __init__(self, sigma = 1.0, DiffusionNN = 250, NEigs=10):
-        # values for SalinasA; sigma = 1.0, NN = 250
-        self.sigma = sigma
-        self.DiffusionNN = DiffusionNN
-        self.NEigs = NEigs
 
-    def kde(self, X):
-        """
-        Computes the local densities of the points in an n x D matrix X using
-        the threshold value th. Uses K nearest neighbor. A matrix of distances may
-        be passed in.
+def diffusion_distance(G,t):
+# Compute the embedding
+    eigenvecs = G['EigenVecs']
+    eigenvals = G['EigenVals']
+    emb = np.array([eigenvecs[:, i] * (eigenvals[i] ** t) for i in range(len(eigenvals))]).T
+    
+    diffusion_distances = cdist(emb, emb)
 
-        :param X: Data matrix (n x D)
-        :param D: Optional precomputed distance matrix
-        :return: p: Local densities of points in X
-        """
-        kde_sklearn = KernelDensity(kernel='gaussian', bandwidth=self.sigma).fit(X)
-        log_density = kde_sklearn.score_samples(X)
-        p_sklearn = np.exp(log_density)
+    # print(f"Diffusion distance matrix at t={t}:")
+    # print(diffusion_distances)
 
-        p_sklearn /= np.sum(p_sklearn)
-        return p_sklearn
+    return diffusion_distances, emb
